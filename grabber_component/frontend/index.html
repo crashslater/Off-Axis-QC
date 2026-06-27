@@ -55,8 +55,8 @@
   .striphead h3 { margin:0; font-size:14px; font-weight:700; }
   .count { color:var(--muted); font-size:12.5px; }
 
-  .sendrow { display:flex; align-items:center; gap:10px; margin:6px 2px 14px; flex-wrap:wrap; }
-  .sendnote { color:var(--muted); font-size:12px; }
+  .sendrow { display:flex; align-items:center; gap:10px; margin:6px 2px 6px; flex-wrap:wrap; }
+  .sendnote { color:var(--muted); font-size:12px; margin:0 2px 14px; }
 
   .strip { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:10px; }
   .thumb { position:relative; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:#000; }
@@ -126,8 +126,8 @@
     <button id="process" class="process" disabled>&#9654; Process Frames in QC</button>
     <button id="download" disabled>Download ZIP</button>
     <button id="clear" disabled>Clear all</button>
-    <span class="sendnote" id="sendnote">Capture frames, then send them straight to QC. (ZIP download is a backup.)</span>
   </div>
+  <div class="sendnote" id="sendnote">Process sends frames straight to QC. Download ZIP is a backup you can upload under “Run QC on stills.”</div>
 
   <div id="strip" class="strip"></div>
   <div id="emptystrip" class="emptystrip">No frames yet. Shuttle to a graphic and press the Up arrow (or Capture).</div>
