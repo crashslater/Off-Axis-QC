@@ -10,6 +10,7 @@
 #  - Reserved bug zone now uses edge-density (not raw brightness); off by default.
 #  - Price-format warning lands only on rows that contain a price (no more smearing).
 #  - Name-inconsistency uses word-boundary matching (no more false substring hits).
+#  - Removed the redundant ALL-CAPS check (Capitalization drift fully covers it).
 #
 # To release an update: change APP_VERSION below, then commit and push.
 
@@ -39,7 +40,7 @@ except Exception:
 # App Identity / Local Storage
 # -----------------------------
 APP_NAME = "Off Axis Entertainment GFX QC"
-APP_VERSION = "v1.2"
+APP_VERSION = "v1.3"
 CONFIG_DIR = Path.home() / "Library" / "Application Support" / "OffAxisGFXQC"
 CONFIG_PATH = CONFIG_DIR / "config.json"
 
@@ -242,11 +243,6 @@ with st.sidebar:
     else:
         bug_zone_width_pct, bug_zone_height_pct = 18, 40
 
-    check_all_caps_style = st.checkbox(
-        "Auto-detect ALL CAPS style (warn only when most frames are ALL CAPS)",
-        value=True,
-        help="If most frames are ALL CAPS, warn on frames that are not. Skipped if Capitalization drift is enabled.",
-    )
     check_caps_drift = st.checkbox(
         "Capitalization drift (warn only outliers vs the batch majority)",
         value=True,
@@ -680,26 +676,6 @@ def detect_issues(extracted_texts: list, pil_images: list) -> list:
                         continue
                     if v != expected:
                         issues[i] += "WARN — Capitalization drift | "
-    else:
-        if check_all_caps_style and len(texts) >= 2:
-            all_caps_flags = []
-            for t in texts:
-                letters = [c for c in t if c.isalpha()]
-                if len(letters) < 4:
-                    all_caps_flags.append(None)
-                else:
-                    all_caps_flags.append(is_all_caps_text(t))
-
-            voted = [v for v in all_caps_flags if v is not None]
-            if len(voted) >= 2:
-                caps_true = sum(1 for v in voted if v)
-                total = len(voted)
-                if (caps_true / total) >= 0.60:
-                    for i, v in enumerate(all_caps_flags):
-                        if v is None:
-                            continue
-                        if v is False:
-                            issues[i] += "WARN — Casing mismatch (expected ALL CAPS) | "
 
     if check_accent_drift and len(texts) >= 2:
         accent_flags = []
