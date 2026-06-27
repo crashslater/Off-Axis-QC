@@ -11,6 +11,7 @@
 #  - Price-format warning lands only on rows that contain a price (no more smearing).
 #  - Name-inconsistency uses word-boundary matching (no more false substring hits).
 #  - Removed the redundant ALL-CAPS check (Capitalization drift fully covers it).
+#  - Added "Grab frames from a video" mode (browser-side capture -> download -> upload).
 #
 # To release an update: change APP_VERSION below, then commit and push.
 
@@ -40,7 +41,7 @@ except Exception:
 # App Identity / Local Storage
 # -----------------------------
 APP_NAME = "Off Axis Entertainment GFX QC"
-APP_VERSION = "v1.3"
+APP_VERSION = "v1.4"
 CONFIG_DIR = Path.home() / "Library" / "Application Support" / "OffAxisGFXQC"
 CONFIG_PATH = CONFIG_DIR / "config.json"
 
@@ -83,6 +84,28 @@ if not check_password():
 
 st.title(APP_NAME)
 st.caption(APP_VERSION)
+
+# -----------------------------
+# Mode: run QC on stills, or grab frames from a video first
+# -----------------------------
+mode = st.radio(
+    "What do you want to do?",
+    ["Run QC on stills", "Grab frames from a video"],
+    horizontal=True,
+)
+
+if mode == "Grab frames from a video":
+    import streamlit.components.v1 as components
+    st.caption(
+        "Load a video, scrub to each graphic, and press the Up arrow (or Capture) to grab a frame. "
+        "Click Download all, then switch to 'Run QC on stills' above and upload the saved frames."
+    )
+    try:
+        grabber_html = (Path(__file__).parent / "video_grabber.html").read_text(encoding="utf-8")
+    except Exception:
+        grabber_html = "<p style='color:#e6e8ec'>Could not load the video grabber.</p>"
+    components.html(grabber_html, height=900, scrolling=True)
+    st.stop()
 
 # -----------------------------
 # Session state
