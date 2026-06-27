@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  :root {
+    --bg: #0e1117; --panel: #161a23; --line: #2a2f3a;
+    --text: #e6e8ec; --muted: #9aa1ad; --accent: #ff5a5f;
+    --fwd: #4a9eff; --rev: #ffb74a; --go: #2ecc71;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; font-size:14px; }
+  .wrap { max-width:1100px; margin:0 auto; padding:4px 2px 24px; }
+
+  .loadrow { display:flex; align-items:center; gap:12px; padding:14px; background:var(--panel);
+    border:1px solid var(--line); border-radius:10px; margin-bottom:12px; }
+  .loadrow label.file { display:inline-flex; align-items:center; gap:8px; background:#1f2530;
+    border:1px solid var(--line); color:var(--text); padding:8px 14px; border-radius:8px; cursor:pointer; font-weight:600; }
+  .loadrow label.file:hover { border-color:#3a4150; }
+  .loadrow input[type=file] { display:none; }
+  .hint { color:var(--muted); font-size:12.5px; }
+
+  .stage { background:#000; border:1px solid var(--line); border-radius:10px; overflow:hidden;
+    display:flex; align-items:center; justify-content:center; min-height:320px; }
+  video { width:100%; max-height:460px; display:block; background:#000; }
+  .empty { color:var(--muted); padding:60px 20px; text-align:center; }
+
+  .controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:12px 0; padding:10px;
+    background:var(--panel); border:1px solid var(--line); border-radius:10px; }
+  button { background:#1f2530; color:var(--text); border:1px solid var(--line); padding:9px 13px;
+    border-radius:8px; cursor:pointer; font-size:13.5px; font-weight:600; }
+  button:hover:not(:disabled) { border-color:#3a4150; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  button.capture { background:var(--accent); border-color:var(--accent); color:#fff; padding:9px 20px; }
+  button.capture:hover:not(:disabled) { filter:brightness(1.08); }
+  button.process { background:var(--go); border-color:var(--go); color:#06210f; padding:11px 22px; font-size:14.5px; }
+  button.process:hover:not(:disabled) { filter:brightness(1.08); }
+  button.active-fwd { background:var(--fwd); border-color:var(--fwd); color:#06121f; }
+  button.active-rev { background:var(--rev); border-color:var(--rev); color:#1f1505; }
+  .seg { display:inline-flex; gap:4px; align-items:center; }
+  .seg .lbl { color:var(--muted); font-size:11.5px; margin-right:2px; }
+  .spacer { flex:1; }
+  .tc { font-variant-numeric:tabular-nums; color:var(--text); font-size:14px; padding:0 6px; font-weight:600; }
+  .state { font-size:12.5px; color:var(--muted); min-width:92px; }
+  .fps { display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:12.5px; }
+  .fps input { width:58px; background:#1f2530; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px; }
+
+  .kbd { color:var(--muted); font-size:12px; margin:2px 2px 14px; line-height:1.9; }
+  .kbd b { color:var(--text); background:#1f2530; border:1px solid var(--line); border-radius:4px; padding:1px 6px; font-weight:600; }
+
+  .striphead { display:flex; align-items:center; justify-content:space-between; margin:6px 2px 8px; }
+  .striphead h3 { margin:0; font-size:14px; font-weight:700; }
+  .count { color:var(--muted); font-size:12.5px; }
+
+  .sendrow { display:flex; align-items:center; gap:10px; margin:6px 2px 14px; flex-wrap:wrap; }
+  .sendnote { color:var(--muted); font-size:12px; }
+
+  .strip { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:10px; }
+  .thumb { position:relative; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:#000; }
+  .thumb img { width:100%; display:block; aspect-ratio:16/9; object-fit:cover; }
+  .thumb .meta { font-size:11px; color:var(--muted); padding:5px 7px; background:var(--panel); display:flex; justify-content:space-between; }
+  .thumb .rm { position:absolute; top:5px; right:5px; width:24px; height:24px; border-radius:6px;
+    background:rgba(0,0,0,.6); border:1px solid var(--line); color:#fff; font-size:14px; line-height:1; padding:0;
+    display:flex; align-items:center; justify-content:center; }
+  .thumb .rm:hover { background:var(--accent); border-color:var(--accent); }
+
+  .emptystrip { color:var(--muted); border:1px dashed var(--line); border-radius:10px; padding:28px; text-align:center; }
+  .flash { position:fixed; inset:0; background:#fff; opacity:0; pointer-events:none; }
+  .flash.go { animation:flash .18s ease-out; }
+  @keyframes flash { 0%{opacity:0} 25%{opacity:.55} 100%{opacity:0} }
+  @media (prefers-reduced-motion: reduce){ .flash.go{ animation:none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="loadrow">
+    <label class="file"><span>Choose video</span><input id="file" type="file" accept="video/*" /></label>
+    <span id="fname" class="hint">No video loaded. The file stays on your computer — only the frames you capture get sent.</span>
+  </div>
+
+  <div class="stage">
+    <video id="video" controls playsinline style="display:none"></video>
+    <div id="empty" class="empty">Load a video to begin.</div>
+  </div>
+
+  <div class="controls">
+    <span class="seg">
+      <span class="lbl">Reverse</span>
+      <button id="rev2"  disabled>2&times;</button>
+      <button id="rev5"  disabled>5&times;</button>
+      <button id="rev10" disabled>10&times;</button>
+    </span>
+    <button id="pause" disabled>&#10073;&#10073; Pause</button>
+    <button id="playfwd" disabled>&#9654; Play</button>
+    <span class="seg">
+      <span class="lbl">Fwd</span>
+      <button id="fwd2"  disabled>2&times;</button>
+      <button id="fwd5"  disabled>5&times;</button>
+      <button id="fwd10" disabled>10&times;</button>
+    </span>
+    <button id="back1f" disabled>&lsaquo; frame</button>
+    <button id="fwd1f"  disabled>frame &rsaquo;</button>
+    <span class="state" id="state">Paused</span>
+    <span class="spacer"></span>
+    <span class="tc" id="tc">00:00:00.00</span>
+    <span class="fps">fps <input id="fps" type="number" value="30" min="1" max="120" step="0.01" /></span>
+    <button id="capture" class="capture" disabled>Capture &nbsp;(&uarr;)</button>
+  </div>
+
+  <div class="kbd">
+    Shuttle (editor-style): <b>J</b> reverse &nbsp; <b>K</b> pause &nbsp; <b>L</b> forward &nbsp;
+    (tap J or L again to speed up: 2&times; &rarr; 5&times; &rarr; 10&times;)<br>
+    <b>I</b> or <b>&uarr;</b> capture &nbsp; <b>Shift</b>+<b>&larr;</b>/<b>&rarr;</b> step one frame &nbsp; <b>Space</b> play / pause
+  </div>
+
+  <div class="striphead">
+    <h3>Captured frames</h3>
+    <span class="count" id="count">0 captured</span>
+  </div>
+
+  <div class="sendrow">
+    <button id="process" class="process" disabled>&#9654; Process Frames in QC</button>
+    <button id="download" disabled>Download ZIP</button>
+    <button id="clear" disabled>Clear all</button>
+    <span class="sendnote" id="sendnote">Capture frames, then send them straight to QC. (ZIP download is a backup.)</span>
+  </div>
+
+  <div id="strip" class="strip"></div>
+  <div id="emptystrip" class="emptystrip">No frames yet. Shuttle to a graphic and press the Up arrow (or Capture).</div>
+</div>
+
+<div id="flash" class="flash"></div>
+
+<script>
+(function () {
+  // ---- Streamlit component protocol ----
+  function post(type, data){ window.parent.postMessage(Object.assign({isStreamlitMessage:true, type:type}, data||{}), "*"); }
+  function ready(){ post("streamlit:componentReady", {apiVersion:1}); }
+  function setHeight(h){ post("streamlit:setFrameHeight", {height: h}); }
+  function setValue(value){ post("streamlit:setComponentValue", {value: value, dataType:"json"}); }
+  function syncHeight(){ try { setHeight(document.documentElement.scrollHeight + 8); } catch(e){} }
+  window.addEventListener("message", function(e){ /* render args available on e.data.args if needed */ });
+
+  const $ = id => document.getElementById(id);
+  const fileEl=$('file'), fname=$('fname'), video=$('video'), empty=$('empty'),
+        tcEl=$('tc'), fpsEl=$('fps'), strip=$('strip'), emptyStrip=$('emptystrip'),
+        countEl=$('count'), flash=$('flash'), stateEl=$('state');
+  const allBtns=['rev2','rev5','rev10','pause','playfwd','fwd2','fwd5','fwd10','back1f','fwd1f','capture'].map($);
+
+  let frames=[]; const canvas=document.createElement('canvas');
+  let dir=0, speed=1, raf=null, lastTs=null;
+
+  const fps=()=>{ const v=parseFloat(fpsEl.value); return (v&&v>0)?v:30; };
+  const p=(n,w=2)=>String(n).padStart(w,'0');
+  function fmtTC(sec){ if(!isFinite(sec))sec=0; const h=Math.floor(sec/3600),m=Math.floor((sec%3600)/60),
+    s=Math.floor(sec%60),f=Math.floor((sec-Math.floor(sec))*fps()); return `${p(h)}:${p(m)}:${p(s)}.${p(f)}`; }
+  function tcTag(sec){ const h=Math.floor(sec/3600),m=Math.floor((sec%3600)/60),s=Math.floor(sec%60); return `${p(h)}${p(m)}${p(s)}`; }
+  const updTC=()=>tcEl.textContent=fmtTC(video.currentTime||0);
+
+  function setEnabled(on){ allBtns.forEach(b=>b.disabled=!on); }
+
+  function highlight(){
+    ['rev2','rev5','rev10','fwd2','fwd5','fwd10','playfwd'].forEach(id=>{ $(id).classList.remove('active-fwd','active-rev'); });
+    if(dir===1){ const id = speed>=10?'fwd10':speed>=5?'fwd5':speed>=2?'fwd2':'playfwd'; $(id).classList.add('active-fwd'); }
+    else if(dir===-1){ const id = speed>=10?'rev10':speed>=5?'rev5':'rev2'; $(id).classList.add('active-rev'); }
+    stateEl.textContent = dir===0 ? 'Paused' : (dir===1?'\u25B6 ':'\u25C0 ') + speed + '\u00D7';
+  }
+
+  function stopRaf(){ if(raf){ cancelAnimationFrame(raf); raf=null; } lastTs=null; }
+  function pausePlayback(){ stopRaf(); video.pause(); dir=0; speed=1; highlight(); }
+  function playForward(sp){ stopRaf(); dir=1; speed=sp; video.playbackRate=sp; video.play().catch(()=>{}); highlight(); }
+  function reverseTick(ts){
+    if(lastTs==null) lastTs=ts;
+    const dt=(ts-lastTs)/1000; lastTs=ts;
+    let t=video.currentTime - speed*dt;
+    if(t<=0){ video.currentTime=0; pausePlayback(); updTC(); return; }
+    video.currentTime=t; updTC();
+    raf=requestAnimationFrame(reverseTick);
+  }
+  function playReverse(sp){ stopRaf(); video.pause(); dir=-1; speed=sp; highlight(); lastTs=null; raf=requestAnimationFrame(reverseTick); }
+  function bumpForward(){ if(dir!==1){ playForward(1); return; } const next = speed<2?2 : speed<5?5 : 10; playForward(next); }
+  function bumpReverse(){ if(dir!==-1){ playReverse(2); return; } const next = speed<5?5 : 10; playReverse(next); }
+  function stepFrame(d){ pausePlayback(); let t=video.currentTime + d/fps();
+    if(t<0)t=0; if(isFinite(video.duration))t=Math.min(t,video.duration-0.001); video.currentTime=t; updTC(); }
+
+  $('rev2').onclick=()=>playReverse(2);  $('rev5').onclick=()=>playReverse(5);  $('rev10').onclick=()=>playReverse(10);
+  $('fwd2').onclick=()=>playForward(2);  $('fwd5').onclick=()=>playForward(5);  $('fwd10').onclick=()=>playForward(10);
+  $('playfwd').onclick=()=>playForward(1);
+  $('pause').onclick=()=>pausePlayback();
+  $('back1f').onclick=()=>stepFrame(-1);  $('fwd1f').onclick=()=>stepFrame(1);
+
+  fileEl.addEventListener('change',()=>{
+    const f=fileEl.files&&fileEl.files[0]; if(!f) return;
+    video.src=URL.createObjectURL(f); video.style.display='block'; empty.style.display='none';
+    fname.textContent=f.name+" \u2014 loaded.";
+    video.addEventListener('loadedmetadata',()=>{ setEnabled(true); updTC(); highlight(); syncHeight(); },{once:true});
+  });
+  video.addEventListener('timeupdate',updTC);
+  video.addEventListener('seeked',updTC);
+  video.addEventListener('ended',()=>pausePlayback());
+
+  function capture(){
+    if(!video.src||!video.videoWidth) return;
+    canvas.width=video.videoWidth; canvas.height=video.videoHeight;
+    canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
+    frames.push({url:canvas.toDataURL('image/jpeg',0.92), tc:tcTag(video.currentTime)});
+    render();
+    flash.classList.remove('go'); void flash.offsetWidth; flash.classList.add('go');
+  }
+  $('capture').onclick=capture;
+
+  function render(){
+    countEl.textContent=frames.length+' captured';
+    $('download').disabled=!frames.length; $('clear').disabled=!frames.length; $('process').disabled=!frames.length;
+    emptyStrip.style.display=frames.length?'none':'block'; strip.innerHTML='';
+    frames.forEach((fr,i)=>{
+      const c=document.createElement('div'); c.className='thumb';
+      c.innerHTML=`<button class="rm" title="Remove" data-i="${i}">&times;</button>`+
+        `<img src="${fr.url}" alt="frame ${i+1}" />`+
+        `<div class="meta"><span>#${String(i+1).padStart(3,'0')}</span><span>${fr.tc}</span></div>`;
+      strip.appendChild(c);
+    });
+    strip.querySelectorAll('.rm').forEach(b=>b.onclick=()=>{ frames.splice(parseInt(b.dataset.i,10),1); render(); });
+    syncHeight();
+  }
+
+  function downloadSequential(){
+    let i=0;
+    const next=()=>{ if(i>=frames.length) return; const fr=frames[i]; const a=document.createElement('a');
+      a.href=fr.url; a.download=`grab_${String(i+1).padStart(3,'0')}_tc${fr.tc}.jpg`;
+      document.body.appendChild(a); a.click(); a.remove(); i++; setTimeout(next,180); };
+    next();
+  }
+  async function downloadZip(){
+    if(!frames.length) return;
+    if(typeof JSZip === 'undefined'){ downloadSequential(); return; }
+    const btn=$('download'); const prev=btn.textContent; btn.disabled=true; btn.textContent='Zipping\u2026';
+    try {
+      const zip=new JSZip();
+      frames.forEach((fr,i)=>{ zip.file(`grab_${String(i+1).padStart(3,'0')}_tc${fr.tc}.jpg`, fr.url.split(',')[1], {base64:true}); });
+      const blob=await zip.generateAsync({type:'blob'});
+      const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='gfx_frames.zip';
+      document.body.appendChild(a); a.click(); a.remove();
+    } catch(e){ downloadSequential(); }
+    btn.textContent=prev; btn.disabled=false;
+  }
+  $('download').onclick=downloadZip;
+  $('clear').onclick=()=>{ if(frames.length && confirm('Remove all captured frames?')){ frames=[]; render(); } };
+
+  // ---- Process: send frames to Streamlit/Python ----
+  // QC reads on-screen text + judges title-safe margins, so a 1440px-wide JPEG is
+  // plenty and keeps the payload small/fast. The ZIP backup stays full quality.
+  function shrink(dataURL, maxW){
+    return new Promise(function(res){
+      const img=new Image();
+      img.onload=function(){
+        let w=img.naturalWidth, h=img.naturalHeight;
+        if(w>maxW){ h=Math.round(h*maxW/w); w=maxW; }
+        const c=document.createElement('canvas'); c.width=w; c.height=h;
+        c.getContext('2d').drawImage(img,0,0,w,h);
+        res(c.toDataURL('image/jpeg',0.85).split(',')[1]);
+      };
+      img.onerror=function(){ res(dataURL.split(',')[1]); };
+      img.src=dataURL;
+    });
+  }
+  async function processToQC(){
+    if(!frames.length) return;
+    const btn=$('process'); const prev=btn.textContent; btn.disabled=true;
+    const out=[];
+    for(let i=0;i<frames.length;i++){
+      btn.textContent='Preparing '+(i+1)+'/'+frames.length+'\u2026';
+      const b64=await shrink(frames[i].url, 1440);
+      out.push({ name:`grab_${String(i+1).padStart(3,'0')}_tc${frames[i].tc}.jpg`, b64:b64 });
+    }
+    btn.textContent='Sending to QC\u2026';
+    setValue({ submitId: Date.now(), frames: out });
+    setTimeout(()=>{ btn.textContent=prev; btn.disabled=false; }, 2000);
+  }
+  $('process').onclick=processToQC;
+
+  window.addEventListener('keydown',(e)=>{
+    if(e.target && e.target.tagName==='INPUT') return;
+    const k=e.key.toLowerCase();
+    if(e.key==='ArrowUp' || k==='i'){ e.preventDefault(); capture(); }
+    else if(e.key==='ArrowLeft'){ e.preventDefault(); stepFrame(-1); }
+    else if(e.key==='ArrowRight'){ e.preventDefault(); stepFrame(1); }
+    else if(k==='l'){ e.preventDefault(); bumpForward(); }
+    else if(k==='j'){ e.preventDefault(); bumpReverse(); }
+    else if(k==='k'){ e.preventDefault(); pausePlayback(); }
+    else if(e.key===' '){ e.preventDefault(); if(dir===0) playForward(1); else pausePlayback(); }
+  });
+
+  ready();
+  render();
+  setTimeout(syncHeight, 50);
+  window.addEventListener('load', ()=> setTimeout(syncHeight, 50));
+})();
+</script>
+</body>
+</html>
