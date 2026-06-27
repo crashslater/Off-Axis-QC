@@ -11,7 +11,7 @@
 #  - Price-format warning lands only on rows that contain a price (no more smearing).
 #  - Name-inconsistency uses word-boundary matching (no more false substring hits).
 #  - Removed the redundant ALL-CAPS check (Capitalization drift fully covers it).
-#  - Added "Grab frames from a video" mode (browser-side capture -> download -> upload).
+#  - Added "Grab frames from a video" mode (browser-side capture, J-K-L shuttle).
 #
 # To release an update: change APP_VERSION below, then commit and push.
 
@@ -41,7 +41,7 @@ except Exception:
 # App Identity / Local Storage
 # -----------------------------
 APP_NAME = "Off Axis Entertainment GFX QC"
-APP_VERSION = "v1.4"
+APP_VERSION = "v1.5"
 CONFIG_DIR = Path.home() / "Library" / "Application Support" / "OffAxisGFXQC"
 CONFIG_PATH = CONFIG_DIR / "config.json"
 
@@ -97,7 +97,7 @@ mode = st.radio(
 if mode == "Grab frames from a video":
     import streamlit.components.v1 as components
     st.caption(
-        "Load a video, scrub to each graphic, and press the Up arrow (or Capture) to grab a frame. "
+        "Load a video, shuttle to each graphic (J/K/L), and press the Up arrow (or Capture) to grab a frame. "
         "Click Download all, then switch to 'Run QC on stills' above and upload the saved frames."
     )
     try:
