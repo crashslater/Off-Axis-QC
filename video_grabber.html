@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
   :root {
     --bg: #0e1117; --panel: #161a23; --line: #2a2f3a;
@@ -108,14 +109,14 @@
   <div class="kbd">
     Shuttle (editor-style): <b>J</b> reverse &nbsp; <b>K</b> pause &nbsp; <b>L</b> forward &nbsp;
     (tap J or L again to speed up: 2&times; &rarr; 5&times; &rarr; 10&times;)<br>
-    <b>&uarr;</b> capture &nbsp; <b>Shift</b>+<b>&larr;</b>/<b>&rarr;</b> step one frame &nbsp; <b>Space</b> play / pause
+    <b>I</b> or <b>&uarr;</b> capture &nbsp; <b>Shift</b>+<b>&larr;</b>/<b>&rarr;</b> step one frame &nbsp; <b>Space</b> play / pause
   </div>
 
   <div class="striphead">
     <h3>Captured frames</h3>
     <div>
       <span class="count" id="count">0 captured</span> &nbsp;&nbsp;
-      <button id="download" disabled>Download all</button>
+      <button id="download" disabled>Download ZIP</button>
       <button id="clear" disabled>Clear all</button>
     </div>
   </div>
@@ -199,6 +200,8 @@
   });
   video.addEventListener('timeupdate',updTC);
   video.addEventListener('seeked',updTC);
+  video.addEventListener('play',()=>{ if(dir!==1){ dir=1; if(speed<1)speed=1; highlight(); } });
+  video.addEventListener('pause',()=>{ if(dir===1){ /* keep state unless user paused */ } });
   video.addEventListener('ended',()=>pausePlayback());
 
   function capture(){
@@ -225,19 +228,36 @@
     strip.querySelectorAll('.rm').forEach(b=>b.onclick=()=>{ frames.splice(parseInt(b.dataset.i,10),1); render(); });
   }
 
-  $('download').onclick=()=>{
-    if(!frames.length) return; let i=0;
+  function downloadSequential(){
+    let i=0;
     const next=()=>{ if(i>=frames.length) return; const fr=frames[i]; const a=document.createElement('a');
       a.href=fr.url; a.download=`grab_${String(i+1).padStart(3,'0')}_tc${fr.tc}.jpg`;
       document.body.appendChild(a); a.click(); a.remove(); i++; setTimeout(next,180); };
     next();
-  };
+  }
+  async function downloadZip(){
+    if(!frames.length) return;
+    if(typeof JSZip === 'undefined'){ downloadSequential(); return; }
+    const btn=$('download'); const prev=btn.textContent; btn.disabled=true; btn.textContent='Zipping…';
+    try {
+      const zip=new JSZip();
+      frames.forEach((fr,i)=>{
+        const b64=fr.url.split(',')[1];
+        zip.file(`grab_${String(i+1).padStart(3,'0')}_tc${fr.tc}.jpg`, b64, {base64:true});
+      });
+      const blob=await zip.generateAsync({type:'blob'});
+      const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='gfx_frames.zip';
+      document.body.appendChild(a); a.click(); a.remove();
+    } catch(e){ downloadSequential(); }
+    btn.textContent=prev; btn.disabled=false;
+  }
+  $('download').onclick=downloadZip;
   $('clear').onclick=()=>{ if(frames.length && confirm('Remove all captured frames?')){ frames=[]; render(); } };
 
   window.addEventListener('keydown',(e)=>{
     if(e.target && e.target.tagName==='INPUT') return;
     const k=e.key.toLowerCase();
-    if(e.key==='ArrowUp'){ e.preventDefault(); capture(); }
+    if(e.key==='ArrowUp' || k==='i'){ e.preventDefault(); capture(); }
     else if(e.key==='ArrowLeft'){ e.preventDefault(); stepFrame(-1); }
     else if(e.key==='ArrowRight'){ e.preventDefault(); stepFrame(1); }
     else if(k==='l'){ e.preventDefault(); bumpForward(); }

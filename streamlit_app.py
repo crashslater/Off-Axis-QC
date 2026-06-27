@@ -6,19 +6,22 @@
 #  2. A shared password gate (st.secrets["APP_PASSWORD"]) protects the public URL.
 #  3. The "Quit Server" button is removed (you never want a user killing the shared server).
 #
-# QC fixes in this revision:
-#  - Reserved bug zone now uses edge-density (not raw brightness); off by default.
-#  - Price-format warning lands only on rows that contain a price (no more smearing).
-#  - Name-inconsistency uses word-boundary matching (no more false substring hits).
-#  - Removed the redundant ALL-CAPS check (Capitalization drift fully covers it).
-#  - Added "Grab frames from a video" mode (browser-side capture, J-K-L shuttle).
+# QC fixes & features in this line of revisions:
+#  - Reserved bug zone uses edge-density (not raw brightness); off by default.
+#  - Price-format warning lands only on rows that contain a price.
+#  - Name-inconsistency uses word-boundary matching.
+#  - Removed the redundant ALL-CAPS check (Capitalization drift covers it).
+#  - Video frame grabber mode (J-K-L shuttle, I/Up capture, ZIP download).
+#  - Uploader accepts a ZIP of frames and expands it automatically.
 #
 # To release an update: change APP_VERSION below, then commit and push.
 
 import os
+import io
 import json
 import base64
 import tempfile
+import zipfile
 import re
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -41,7 +44,7 @@ except Exception:
 # App Identity / Local Storage
 # -----------------------------
 APP_NAME = "Off Axis Entertainment GFX QC"
-APP_VERSION = "v1.5"
+APP_VERSION = "v1.6"
 CONFIG_DIR = Path.home() / "Library" / "Application Support" / "OffAxisGFXQC"
 CONFIG_PATH = CONFIG_DIR / "config.json"
 
@@ -97,8 +100,8 @@ mode = st.radio(
 if mode == "Grab frames from a video":
     import streamlit.components.v1 as components
     st.caption(
-        "Load a video, shuttle to each graphic (J/K/L), and press the Up arrow (or Capture) to grab a frame. "
-        "Click Download all, then switch to 'Run QC on stills' above and upload the saved frames."
+        "Load a video, shuttle to each graphic (J/K/L), and press I or the Up arrow to capture. "
+        "Click Download ZIP, then switch to 'Run QC on stills' above and upload that ZIP."
     )
     try:
         grabber_html = (Path(__file__).parent / "video_grabber.html").read_text(encoding="utf-8")
@@ -181,6 +184,34 @@ def compute_run_signature(uploaded_files, series_name: str, episode_number: str)
     s = (series_name or "").strip()
     e = (episode_number or "").strip()
     return "|".join(parts) + f"||SERIES={s}||EP={e}"
+
+def expand_uploads(files) -> list:
+    """Return a list of (name, image_bytes). Any uploaded .zip is expanded into
+    its image members, so a ZIP from the video grabber works the same as loose
+    image uploads."""
+    blobs = []
+    for f in (files or []):
+        name = getattr(f, "name", "file")
+        try:
+            f.seek(0)
+            raw = f.read()
+        except Exception:
+            raw = b""
+        low = name.lower()
+        if low.endswith(".zip"):
+            try:
+                zf = zipfile.ZipFile(io.BytesIO(raw))
+                for member in sorted(zf.namelist()):
+                    ml = member.lower()
+                    if member.endswith("/") or member.startswith("__MACOSX"):
+                        continue
+                    if ml.endswith((".png", ".jpg", ".jpeg")):
+                        blobs.append((member.split("/")[-1], zf.read(member)))
+            except Exception:
+                pass
+        elif low.endswith((".png", ".jpg", ".jpeg")):
+            blobs.append((name, raw))
+    return blobs
 
 # -----------------------------
 # Resolve API key (host secret first, sidebar fallback for local dev)
@@ -336,8 +367,8 @@ require_meta = st.checkbox("Require Series + Episode before processing", value=F
 # Upload
 # -----------------------------
 uploaded_files = st.file_uploader(
-    "Upload frame images (PNG/JPG).",
-    type=["png", "jpg", "jpeg"],
+    "Upload frame images (PNG/JPG) or a ZIP of frames from the video grabber.",
+    type=["png", "jpg", "jpeg", "zip"],
     accept_multiple_files=True,
 )
 
@@ -393,9 +424,8 @@ st.session_state.qc_running = True
 # -----------------------------
 # Vision extract (+ Safe)
 # -----------------------------
-def encode_image(uploaded_file) -> str:
-    uploaded_file.seek(0)
-    return base64.b64encode(uploaded_file.read()).decode("utf-8")
+def encode_bytes(data: bytes) -> str:
+    return base64.b64encode(data).decode("utf-8")
 
 def vision_extract(image_b64: str) -> dict:
     safe_rules = ""
@@ -810,28 +840,33 @@ def write_excel_minimal(rows: list, issue_strings: list, images: list, series: s
 # -----------------------------
 tabs = st.tabs(["QC Log", "Summary"])
 with tabs[0]:
-    st.write(f"Frames uploaded: **{len(uploaded_files)}**")
+    frame_blobs = expand_uploads(uploaded_files)
+    st.write(f"Frames to process: **{len(frame_blobs)}**")
     st.write(
         f"Series: **{(series_name or '').strip() or '—'}**  |  "
         f"Episode: **{(episode_number or '').strip() or '—'}**"
     )
 
+    if not frame_blobs:
+        st.session_state.qc_running = False
+        st.warning("No images found. Upload PNG/JPG frames or a ZIP containing them.")
+        st.stop()
+
     progress = st.progress(0)
     status = st.empty()
 
-    extracted = [None] * len(uploaded_files)
-    pil_images = [None] * len(uploaded_files)
+    extracted = [None] * len(frame_blobs)
+    pil_images = [None] * len(frame_blobs)
 
-    def worker(i, f):
-        img_b64 = encode_image(f)
-        f.seek(0)
-        pil = Image.open(f).convert("RGB")
-        data = vision_extract(img_b64)
-        return i, data, pil
+    def worker(i, name, data):
+        img_b64 = encode_bytes(data)
+        pil = Image.open(io.BytesIO(data)).convert("RGB")
+        result = vision_extract(img_b64)
+        return i, result, pil
 
     try:
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
-            futures = [ex.submit(worker, i, f) for i, f in enumerate(uploaded_files)]
+            futures = [ex.submit(worker, i, nm, dt) for i, (nm, dt) in enumerate(frame_blobs)]
             done = 0
             total = len(futures)
             for fut in as_completed(futures):
