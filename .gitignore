@@ -1,0 +1,18 @@
+# Secrets — NEVER commit these
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+.DS_Store
+
+# Build artifacts (from the old desktop build)
+build/
+dist/
+dmg_stage/
+*.dmg
+*.spec
