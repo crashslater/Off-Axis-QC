@@ -6,7 +6,12 @@
 #  2. A shared password gate (st.secrets["APP_PASSWORD"]) protects the public URL.
 #  3. The "Quit Server" button is removed (you never want a user killing the shared server).
 #
-# QC logic is unchanged from the working desktop version.
+# QC fixes in this revision:
+#  - Reserved bug zone now uses edge-density (not raw brightness); off by default.
+#  - Price-format warning lands only on rows that contain a price (no more smearing).
+#  - Name-inconsistency uses word-boundary matching (no more false substring hits).
+#
+# To release an update: change APP_VERSION below, then commit and push.
 
 import os
 import json
@@ -19,7 +24,7 @@ from difflib import SequenceMatcher
 
 import streamlit as st
 from openai import OpenAI, RateLimitError, APIError, AuthenticationError
-from PIL import Image
+from PIL import Image, ImageFilter
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.styles import Alignment, PatternFill, Font
@@ -34,6 +39,7 @@ except Exception:
 # App Identity / Local Storage
 # -----------------------------
 APP_NAME = "Off Axis Entertainment GFX QC"
+APP_VERSION = "v1.2"
 CONFIG_DIR = Path.home() / "Library" / "Application Support" / "OffAxisGFXQC"
 CONFIG_PATH = CONFIG_DIR / "config.json"
 
@@ -75,6 +81,7 @@ if not check_password():
     st.stop()
 
 st.title(APP_NAME)
+st.caption(APP_VERSION)
 
 # -----------------------------
 # Session state
@@ -226,8 +233,8 @@ with st.sidebar:
 
     check_reserved_bug_zone = st.checkbox(
         "Reserved bug zone (warn if graphics enter lower-right area)",
-        value=True,
-        help="Lower-right area reserved for the network bug; graphics should not enter.",
+        value=False,
+        help="Approximate edge-density check on the lower-right network-bug area. Can trip on busy backgrounds, so it's off by default — turn on as a soft WARN.",
     )
     if check_reserved_bug_zone:
         bug_zone_width_pct = st.slider("Bug zone width (%)", 5, 30, 18)
@@ -454,14 +461,23 @@ def vision_extract(image_b64: str) -> dict:
 # -----------------------------
 # Reserved bug zone detector
 # -----------------------------
-def detect_reserved_bug_zone_violation(img: Image.Image, width_pct: int = 18, height_pct: int = 40) -> bool:
+def detect_reserved_bug_zone_violation(img: Image.Image, width_pct: int = 18, height_pct: int = 40, edge_threshold: float = 18.0) -> bool:
+    """Approximate: flag if the reserved lower-right zone contains dense, sharp
+    edges (text / graphic elements) instead of smooth background video.
+    Edge density responds to graphics and text, and (unlike the old brightness
+    test) ignores a merely bright but smooth background. Still a heuristic —
+    busy live backgrounds can trip it — so it's meant as a soft WARN and is
+    off by default."""
     w, h = img.size
     x0 = int(w * (1 - (width_pct / 100.0)))
     y0 = int(h * (1 - (height_pct / 100.0)))
     region = img.crop((x0, y0, w, h)).convert("L")
-    pixels = list(region.getdata())
-    avg = sum(pixels) / len(pixels)
-    return avg > 35
+    edges = region.filter(ImageFilter.FIND_EDGES)
+    pixels = list(edges.getdata())
+    if not pixels:
+        return False
+    mean_edge = sum(pixels) / len(pixels)
+    return mean_edge > edge_threshold
 
 # -----------------------------
 # ALL CAPS helpers
@@ -609,11 +625,14 @@ def detect_issues(extracted_texts: list, pil_images: list) -> list:
                     if best and best_score >= name_fuzzy_threshold and cand_sig != best["sig"]:
                         near_miss_notes[i].append(f"{cand}≈{best['canon']} ({best_score}%)")
 
+        def contains_variant(text_in: str, variant: str) -> bool:
+            return re.search(r"\b" + re.escape(variant) + r"\b", text_in) is not None
+
         for canon, vars_seen in variants_by_canon.items():
             if len(vars_seen) > 1:
                 pretty = ", ".join(sorted(vars_seen))
                 for i, t in enumerate(texts):
-                    if any(v in t for v in vars_seen):
+                    if any(contains_variant(t, v) for v in vars_seen):
                         issues[i] += f"WARN — Name inconsistency ({canon}: {pretty}) | "
 
         for i, notes in enumerate(near_miss_notes):
@@ -707,12 +726,15 @@ def detect_issues(extracted_texts: list, pil_images: list) -> list:
                         issues[i] += "WARN — Accent/diacritic consistency | "
 
     if check_price_format:
-        raw_prices = []
+        per_row_prices = []
+        all_prices = []
         for t in texts:
-            raw_prices += re.findall(r"\$\s?\d[\d,]*(?:\.\d{2})?", t)
-        if raw_prices:
-            if any("," in p for p in raw_prices) and any("," not in p for p in raw_prices):
-                for i in range(len(issues)):
+            found = re.findall(r"\$\s?\d[\d,]*(?:\.\d{2})?", t)
+            per_row_prices.append(found)
+            all_prices += found
+        if all_prices and any("," in p for p in all_prices) and any("," not in p for p in all_prices):
+            for i, found in enumerate(per_row_prices):
+                if found:
                     issues[i] += "WARN — Price formatting inconsistency | "
 
     issues = [x[:-3] if x.endswith(" | ") else (x or "") for x in issues]
